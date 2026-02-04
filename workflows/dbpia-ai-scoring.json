@@ -1,0 +1,228 @@
+{
+  "name": "DBpia AI Scoring",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "notesInFlow": true,
+      "notes": "Manually trigger AI scoring for papers"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, doi, title, abstract, published_date, category FROM public.research_papers WHERE relevance_score IS NULL OR ai_summary IS NULL OR category IS NULL ORDER BY published_date DESC LIMIT 50;",
+        "options": {}
+      },
+      "id": "fetch-unscored",
+      "name": "Fetch Unscored Papers",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "DBpia PostgreSQL"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Get papers that haven not been scored yet"
+    },
+    {
+      "parameters": {
+        "jsCode": "const i=$input.all();const prep=[];for(const x of i){if(x.json.id&&x.json.title){prep.push({json:{id:x.json.id,doi:x.json.doi,title:x.json.title,abstract:x.json.abstract||'No abstract',published_date:x.json.published_date,input_text:'Title: '+x.json.title+'\n\nAbstract: '+(x.json.abstract||'No abstract')}});}}return prep.length>0?prep:[{json:{no_papers:true}}];"
+      },
+      "id": "prepare-data",
+      "name": "Prepare AI Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 300
+        },
+        "promptType": "define",
+        "text": "Analyze the research paper and provide: 1. Relevance Score (0-100) based on novelty and quality 2. Summary (one sentence, max 50 words) 3. Category (ML, NLP, CV, Robotics, Data Mining, Software Engineering, Systems, Security, Theory, HCI, Other). Paper: {{ $json.input_text }}. Respond ONLY with JSON: {\"score\": <number>, \"summary\": \"<text>\", \"category\": \"<category>\"}",
+        "outputFormat": "simple"
+      },
+      "id": "llm-scoring",
+      "name": "LLM Scoring",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [
+        900,
+        200
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "2",
+          "name": "OpenAI Account"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "AI analyzes paper and returns score, summary, category"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items=$input.all();const res=[];for(const i of items){try{const o=i.json.text||i.json.output||'';let p={score:0,summary:'',category:'Other'};const m=o.match(/\\{[\\s\\S]*?\\}/);if(m)try{p=JSON.parse(m[0])}catch(e){const s=o.match(/\"score\"\\s*:\\s*(\\d+)/i);const sm=o.match(/\"summary\"\\s*:\\s*\"([^\"]+)\"/i);const cm=o.match(/\"category\"\\s*:\\s*\"([^\"]+)\"/i);if(s)p.score=parseInt(s[1]);if(sm)p.summary=sm[1];if(cm)p.category=cm[1];}if(p.score<0)p.score=0;if(p.score>100)p.score=100;res.push({json:{id:i.json.id,doi:i.json.doi,relevance_score:p.score,ai_summary:p.summary||'',category:p.category||'Other'}});}catch(e){res.push({json:{error:e.message}});}}return res;"
+      },
+      "id": "parse-llm",
+      "name": "Parse LLM Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.relevance_score }}",
+              "rightValue": 80,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-score",
+      "name": "Filter Score >= 80",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "table": "research_papers",
+        "key": "id",
+        "options": {}
+      },
+      "id": "update-db",
+      "name": "Update Database",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1560,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "DBpia PostgreSQL"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Update paper with AI-generated score and summary"
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Unscored Papers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Unscored Papers": {
+      "main": [
+        [
+          {
+            "node": "Prepare AI Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare AI Input": {
+      "main": [
+        [
+          {
+            "node": "LLM Scoring",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Scoring": {
+      "main": [
+        [
+          {
+            "node": "Parse LLM Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse LLM Response": {
+      "main": [
+        [
+          {
+            "node": "Filter Score >= 80",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Score >= 80": {
+      "main": [
+        [
+          {
+            "node": "Update Database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "tags": [
+    {
+      "id": "1",
+      "name": "DBpia"
+    }
+  ]
+}

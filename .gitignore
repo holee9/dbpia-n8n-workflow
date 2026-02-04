@@ -1,0 +1,77 @@
+# =============================================================================
+# .gitignore - DBpia n8n Workflow Project
+# =============================================================================
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Node modules
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# n8n data
+data/
+n8n_data/
+.n8n/
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+pnpm-debug.log*
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS files
+Thumbs.db
+Desktop.ini
+
+# Docker volumes
+docker-volumes/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Memory tracking (keep structure but ignore contents)
+memory/errors/*
+memory/decisions/*
+memory/learnings/*
+!memory/errors/.gitkeep
+!memory/decisions/.gitkeep
+!memory/learnings/.gitkeep
+
+# Sensitive data
+*.key
+*.pem
+*.crt
+secrets/
+credentials/

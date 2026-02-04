@@ -1,0 +1,224 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: dbpia-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-n8n}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-n8n}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-n8n} -d ${DB_NAME:-n8n}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - n8n-network
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+
+  redis:
+    image: redis:7-alpine
+    container_name: dbpia-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - n8n-network
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 64M
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: dbpia-n8n
+    restart: unless-stopped
+    environment:
+      # Core n8n Settings
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PORT: ${N8N_PORT:-5678}
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      NODE_ENV: ${NODE_ENV:-production}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+
+      # Database Configuration
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${DB_NAME:-n8n}
+      DB_POSTGRESDB_USER: ${DB_USER:-n8n}
+      DB_POSTGRESDB_PASSWORD: ${DB_PASSWORD}
+
+      # Redis Configuration (Queue Mode)
+      N8N_REDIS_REDIS_HOST: redis
+      N8N_REDIS_REDIS_PORT: 6379
+      QUEUE_BULL_REDIS_HOST: redis
+      QUEUE_BULL_REDIS_PORT: 6379
+      EXECUTIONS_MODE: queue
+      EXECUTIONS_PROCESS: main
+      QUEUE_BULL_REDIS_DB: 0
+
+      # Basic Authentication
+      N8N_BASIC_AUTH_ACTIVE: ${N8N_BASIC_AUTH_ACTIVE:-true}
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD}
+
+      # Security Settings
+      N8N_EDITOR_BASE_URL: ${N8N_EDITOR_BASE_URL:-/}
+      WEBHOOK_URL: ${WEBHOOK_URL}
+      N8N_METRICS: ${N8N_METRICS:-true}
+      N8N_LOG_LEVEL: ${N8N_LOG_LEVEL:-info}
+      N8N_LOG_OUTPUT: ${N8N_LOG_OUTPUT:-console}
+      N8N_LOG_FILE_COUNT_MAX: ${N8N_LOG_FILE_COUNT_MAX:-100}
+      N8N_LOG_FILE_SIZE_MAX: ${N8N_LOG_FILE_SIZE_MAX:-16}
+      N8N_LOG_FILE_LOCATION: ${N8N_LOG_FILE_LOCATION:-/home/node/.n8n/logs}
+
+      # Performance Settings for Raspberry Pi
+      N8N_PAYLOAD_SIZE_MAX: ${N8N_PAYLOAD_SIZE_MAX:-16}
+      EXECUTIONS_TIMEOUT: ${EXECUTIONS_TIMEOUT:-3600}
+      EXECUTIONS_TIMEOUT_MAX: ${EXECUTIONS_TIMEOUT_MAX:-7200}
+      N8N_CONCURRENCY_PRODUCTION_LIMIT: ${N8N_CONCURRENCY_PRODUCTION_LIMIT:-2}
+
+      # Feature Flags
+      N8N_DISABLE_EDITOR_RAW_MODE: ${N8N_DISABLE_EDITOR_RAW_MODE:-false}
+      N8N_ENABLE_EDITOR_SHAVING_ENDPOINT: ${N8N_ENABLE_EDITOR_SHAVING_ENDPOINT:-true}
+      N8N_ENDPOINT_WEBHOOK: ${N8N_ENDPOINT_WEBHOOK:-webhook}
+      N8N_ENDPOINT_WEBHOOK_TEST: ${N8N_ENDPOINT_WEBHOOK_TEST:-webhook-test}
+
+      # External Service Configuration
+      DBPIA_API_KEY: ${DBPIA_API_KEY}
+      DBPIA_API_URL: ${DBPIA_API_URL:-https://api.dbpia.co.kr}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+
+      # Timezone
+      GENERIC_TIMEZONE: ${TZ:-Asia/Seoul}
+      TZ: ${TZ:-Asia/Seoul}
+
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./workflows:/home/node/.n8n/workflows:ro
+      - ./data/ingest:/home/node/.n8n/ingest
+      - ./data/logs:/home/node/.n8n/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:5678/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - n8n-network
+    deploy:
+      resources:
+        limits:
+          cpus: "3.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+
+  # Worker for processing queued jobs (optional, for better performance)
+  n8n-worker:
+    image: n8nio/n8n:latest
+    container_name: dbpia-n8n-worker
+    restart: unless-stopped
+    command: n8n worker
+    environment:
+      # Core n8n Settings
+      NODE_ENV: ${NODE_ENV:-production}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+
+      # Database Configuration
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${DB_NAME:-n8n}
+      DB_POSTGRESDB_USER: ${DB_USER:-n8n}
+      DB_POSTGRESDB_PASSWORD: ${DB_PASSWORD}
+
+      # Redis Configuration
+      N8N_REDIS_REDIS_HOST: redis
+      N8N_REDIS_REDIS_PORT: 6379
+      QUEUE_BULL_REDIS_HOST: redis
+      QUEUE_BULL_REDIS_PORT: 6379
+      EXECUTIONS_MODE: queue
+
+      # Worker Settings
+      EXECUTIONS_PROCESS: worker
+      N8N_CONCURRENCY_PRODUCTION_LIMIT: ${N8N_WORKER_CONCURRENCY:-2}
+
+      # Log Settings
+      N8N_LOG_LEVEL: ${N8N_LOG_LEVEL:-info}
+      N8N_LOG_OUTPUT: ${N8N_LOG_OUTPUT:-console}
+      GENERIC_TIMEZONE: ${TZ:-Asia/Seoul}
+      TZ: ${TZ:-Asia/Seoul}
+
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./data/logs:/home/node/.n8n/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - n8n-network
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+    profiles:
+      - worker
+
+networks:
+  n8n-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  n8n_data:
+    driver: local

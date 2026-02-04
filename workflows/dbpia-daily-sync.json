@@ -1,0 +1,371 @@
+{
+  "name": "DBpia Daily Sync",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 2 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Cron Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ],
+      "notesInFlow": true,
+      "notes": "Runs daily at 2 AM to fetch new papers from DBpia"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "apiEndpoint",
+              "value": "https://api.dbpia.co.kr/api/paper/new",
+              "type": "string"
+            },
+            {
+              "id": "2",
+              "name": "minRelevanceScore",
+              "value": 80,
+              "type": "number"
+            }
+          ]
+        }
+      },
+      "id": "init-config",
+      "name": "Initialize Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COALESCE(MAX(published_date), CURRENT_DATE - INTERVAL '7 days') as last_date FROM public.research_papers;",
+        "options": {}
+      },
+      "id": "get-last-date",
+      "name": "Get Last Sync Date",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        680,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "DBpia PostgreSQL"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Query database for latest publication date"
+    },
+    {
+      "parameters": {
+        "url": "={{ .apiEndpoint }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "startDate",
+              "value": "={{ .last_date.toISOString().split('T')[0] }}"
+            },
+            {
+              "name": "endDate",
+              "value": "={{ new Date().toISOString().split('T')[0] }}"
+            },
+            {
+              "name": "pageSize",
+              "value": "500"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fetch-new-papers",
+      "name": "Fetch New Papers",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const p=[];const d=$input.all();for(const i of d){if(i.json.data&&Array.isArray(i.json.data)){for(const paper of i.json.data){p.push({doi:paper.doi||paper.identifier||'',title:paper.title||paper.title_ko||'',abstract:paper.abstract||paper.abstract_ko||'',authors:JSON.stringify(paper.authors||paper.author||[]),published_date:paper.publish_date||paper.publishedDate||null,url:paper.url||paper.link||'',keywords:paper.keywords||[]});}}}return p.length>0?p.map(x=>({json:x})):[{json:{no_new_papers:true}}];"
+      },
+      "id": "normalize-data",
+      "name": "Normalize Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.no_new_papers }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-new-papers",
+      "name": "Check for New Papers",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 200
+        },
+        "promptType": "define",
+        "text": "=Analyze this research paper and provide: 1. Relevance score (0-100) 2. One-sentence summary 3. Academic category. Title: {{ $json.title }}. Abstract: {{ $json.abstract }}. Respond in JSON format",
+        "outputFormat": "simple"
+      },
+      "id": "ai-relevance-score",
+      "name": "AI Relevance Scoring",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [
+        1560,
+        200
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "2",
+          "name": "OpenAI Account"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Use LLM to score relevance and generate summary"
+    },
+    {
+      "parameters": {
+        "jsCode": "const r=[];const items=$input.all();for(const i of items){let ai={};const t=i.json.text||i.json.output||'';const m=t.match(/\\{[^}]*\\}/s);if(m)try{ai=JSON.parse(m[0])}catch(e){}r.push({json:{doi:i.json.doi,title:i.json.title,abstract:i.json.abstract,authors:i.json.authors,published_date:i.json.published_date,url:i.json.url,keywords:i.json.keywords||[],relevance_score:ai.score||0,ai_summary:ai.summary||'',category:ai.category||'General'}});}return r;"
+      },
+      "id": "parse-ai-response",
+      "name": "Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.relevance_score }}",
+              "rightValue": 80,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-high-score",
+      "name": "Filter Score >= 80",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "research_papers",
+        "options": {}
+      },
+      "id": "insert-papers",
+      "name": "Insert Papers",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2220,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "DBpia PostgreSQL"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Insert only papers with relevance score >= 80"
+    }
+  ],
+  "connections": {
+    "Cron Trigger": {
+      "main": [
+        [
+          {
+            "node": "Initialize Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Initialize Config": {
+      "main": [
+        [
+          {
+            "node": "Get Last Sync Date",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Last Sync Date": {
+      "main": [
+        [
+          {
+            "node": "Fetch New Papers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch New Papers": {
+      "main": [
+        [
+          {
+            "node": "Normalize Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Data": {
+      "main": [
+        [
+          {
+            "node": "Check for New Papers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check for New Papers": {
+      "main": [
+        [
+          {
+            "node": "AI Relevance Scoring",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Papers Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Relevance Scoring": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "Filter Score >= 80",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Score >= 80": {
+      "main": [
+        [
+          {
+            "node": "Insert Papers",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sync Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "tags": [
+    {
+      "id": "1",
+      "name": "DBpia"
+    }
+  ]
+}

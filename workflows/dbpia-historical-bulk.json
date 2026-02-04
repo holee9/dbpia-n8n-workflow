@@ -1,0 +1,378 @@
+{
+  "name": "DBpia Historical Bulk Import",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "notesInFlow": true,
+      "notes": "Start bulk import of historical papers from DBpia API"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "currentPage",
+              "value": 1,
+              "type": "number"
+            },
+            {
+              "id": "2",
+              "name": "pageSize",
+              "value": 100,
+              "type": "number"
+            },
+            {
+              "id": "3",
+              "name": "maxPages",
+              "value": 100,
+              "type": "number"
+            },
+            {
+              "id": "4",
+              "name": "apiEndpoint",
+              "value": "https://api.dbpia.co.kr/api/paper/search",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "init-variables",
+      "name": "Initialize Variables",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ .apiEndpoint }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "page",
+              "value": "={{ .currentPage }}"
+            },
+            {
+              "name": "pageSize",
+              "value": "={{ .pageSize }}"
+            },
+            {
+              "name": "sort",
+              "value": "date_desc"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-request",
+      "name": "DBpia API Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        300
+      ],
+      "notesInFlow": true,
+      "notes": "Fetch papers from DBpia API with pagination"
+    },
+    {
+      "parameters": {
+        "jsCode": "const papers=[];const d=.all();for(const i of d){if(i.json.data&&Array.isArray(i.json.data)){for(const p of i.json.data){papers.push({doi:p.doi||p.identifier||\"\",title:p.title||p.title_ko||\"\",abstract:p.abstract||p.abstract_ko||\"\",authors:JSON.stringify(p.authors||p.author||[]),published_date:p.publish_date||p.publishedDate||null,url:p.url||p.link||\"\",keywords:p.keywords||[]});}}}return papers.map(p=>({json:p}));"
+      },
+      "id": "parse-data",
+      "name": "Parse and Normalize Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "table": "research_papers",
+        "columnToMatchOn": "doi",
+        "options": {}
+      },
+      "id": "postgres-upsert",
+      "name": "PostgreSQL Upsert",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1340,
+        460
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "DBpia PostgreSQL"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Upsert papers to database"
+    },
+    {
+      "parameters": {
+        "amount": 2000,
+        "unit": "milliseconds"
+      },
+      "id": "rate-limit-wait",
+      "name": "Rate Limit Wait",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1780,
+        200
+      ],
+      "notesInFlow": true,
+      "notes": "Wait 2000ms between API requests"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5",
+              "name": "currentPage",
+              "value": "={{ .currentPage + 1 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "increment-page",
+      "name": "Increment Page",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        1120,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6",
+              "name": "shouldContinue",
+              "value": "={{ .currentPage <= .maxPages }}",
+              "type": "boolean"
+            }
+          ]
+        }
+      },
+      "id": "check-max-pages",
+      "name": "Check Max Pages",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        1340,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ .shouldContinue }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "loop-condition",
+      "name": "Continue Loop?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7",
+              "name": "importSummary",
+              "value": "Historical import completed.",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "final-summary",
+      "name": "Import Summary",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        1780,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Initialize Variables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Initialize Variables": {
+      "main": [
+        [
+          {
+            "node": "DBpia API Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DBpia API Request": {
+      "main": [
+        [
+          {
+            "node": "Check API Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check API Response": {
+      "main": [
+        [
+          {
+            "node": "Parse and Normalize Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Increment Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse and Normalize Data": {
+      "main": [
+        [
+          {
+            "node": "Filter Valid Papers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Valid Papers": {
+      "main": [
+        [
+          {
+            "node": "PostgreSQL Upsert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Increment Page": {
+      "main": [
+        [
+          {
+            "node": "Check Max Pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Max Pages": {
+      "main": [
+        [
+          {
+            "node": "Continue Loop?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Loop?": {
+      "main": [
+        [
+          {
+            "node": "Rate Limit Wait",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Import Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rate Limit Wait": {
+      "main": [
+        [
+          {
+            "node": "DBpia API Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "tags": [
+    {
+      "id": "1",
+      "name": "DBpia"
+    }
+  ]
+}
