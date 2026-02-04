@@ -2,6 +2,52 @@
 
 This document contains rules and guidelines for preventing repeated mistakes and maintaining code quality.
 
+## ⚠️ MANDATORY: Pre-Work Checklist
+
+**BEFORE starting ANY task, you MUST complete this checklist:**
+
+### 1. Memory Check (REQUIRED)
+
+- [ ] **Read `memory/errors/`** - Check for related errors and their solutions
+- [ ] **Read `memory/decisions/`** - Check for architectural decisions
+- [ ] **Read `memory/learnings/`** - Check for relevant knowledge
+- [ ] **Read `memory/tasks/active/`** - Check for incomplete related tasks
+
+### 2. Task Registration (REQUIRED)
+
+- [ ] **Create task record** in `memory/tasks/active/` using template
+- [ ] **Link to related errors** - Reference any relevant error entries
+- [ ] **Link to related decisions** - Reference any relevant decisions
+- [ ] **Document dependencies** - List prerequisites
+
+### 3. Prevention Review (REQUIRED)
+
+- [ ] **Apply known solutions** - From related error entries
+- [ ] **Follow architectural decisions** - From related decision entries
+- [ ] **Use established patterns** - From related learning entries
+
+### 4. Session Context
+
+```
+WHEN resuming work after interruption:
+  1. Check memory/tasks/active/ for your incomplete task
+  2. Review the Work Log section
+  3. Continue from "Next Steps"
+  4. Update status as you progress
+```
+
+### Why This Matters
+
+| Without Memory-First | With Memory-First |
+|---------------------|-------------------|
+| Repeated errors | Learn from past mistakes |
+| Lost context on interrupt | Resume anywhere |
+| No work trail | Full audit history |
+| Siloed knowledge | Shared learning |
+
+---
+
+
 ## Core Principles
 
 1. **Document First** - Create memory entries before implementing fixes
